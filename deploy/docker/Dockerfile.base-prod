@@ -1,0 +1,43 @@
+# BFE Base Image (Production Version without bash)
+# Include conf-agent for production environment (minimal image)
+FROM alpine:3.19
+
+ARG TARGETARCH
+ARG CONF_AGENT_VERSION
+
+# Install only necessary components
+RUN apk update && apk add --no-cache \
+    ca-certificates \
+    && rm -rf /var/cache/apk/*
+
+# Create working directories
+RUN mkdir -p /home/work/conf-agent/conf \
+    && mkdir -p /home/work/conf-agent/log \
+    && mkdir -p /home/work/bfe/conf \
+    && mkdir -p /home/work/bfe/log
+
+# Download and install conf-agent (wget required during build)
+RUN apk add --no-cache wget && \
+    set -ex; \
+    CONF_AGENT_URL=""; \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        CONF_AGENT_URL="https://github.com/bfenetworks/conf-agent/releases/download/${CONF_AGENT_VERSION}/conf-agent_${CONF_AGENT_VERSION#v}_linux_amd64.tar.gz"; \
+    elif [ "${TARGETARCH}" = "arm64" ]; then \
+        CONF_AGENT_URL="https://github.com/bfenetworks/conf-agent/releases/download/${CONF_AGENT_VERSION}/conf-agent_${CONF_AGENT_VERSION#v}_linux_arm64.tar.gz"; \
+    else \
+        echo "Unsupported architecture: ${TARGETARCH}"; \
+        exit 1; \
+    fi; \
+    wget -O /tmp/conf-agent.tar.gz "${CONF_AGENT_URL}"; \
+    tar -xzf /tmp/conf-agent.tar.gz -C /tmp; \
+    mv /tmp/conf-agent /home/work/conf-agent/conf-agent; \
+    chmod +x /home/work/conf-agent/conf-agent; \
+    rm -rf /tmp/conf-agent.tar.gz /tmp/conf-agent /tmp/LICENSE /tmp/README.md /tmp/conf /tmp/docs; \
+    apk del wget
+
+WORKDIR /home/work
+
+# Add labels
+LABEL maintainer="BFE Networks"
+LABEL version="${CONF_AGENT_VERSION}"
+LABEL description="BFE base image with conf-agent (production version)"

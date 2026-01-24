@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bfe
+  namespace: bfe-system
+  labels:
+    app: bfe
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bfe
+  template:
+    metadata:
+      labels:
+        app: bfe
+    spec:
+      containers:
+      - name: bfe
+        image: bfe:latest  # 替换为实际镜像
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: https
+          containerPort: 8443
+          protocol: TCP
+        - name: monitor
+          containerPort: 8421
+          protocol: TCP
+        volumeMounts:
+        - name: bfe-conf
+          mountPath: /home/work/bfe/conf
+          readOnly: false
+        - name: bfe-log
+          mountPath: /home/work/bfe/log
+        - name: conf-agent-conf
+          mountPath: /home/work/conf-agent/conf
+          readOnly: false
+        - name: conf-agent-log
+          mountPath: /home/work/conf-agent/log
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 1000m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /monitor
+            port: 8421
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /monitor
+            port: 8421
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: bfe-conf
+        emptyDir: {}
+      - name: bfe-log
+        emptyDir: {}
+      - name: conf-agent-conf
+        emptyDir: {}
+      - name: conf-agent-log
+        emptyDir: {}

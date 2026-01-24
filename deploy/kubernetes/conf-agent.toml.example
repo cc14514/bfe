@@ -1,0 +1,38 @@
+# conf-agent 配置示例
+# 详细配置说明请参考：https://github.com/bfenetworks/conf-agent
+
+[server]
+# BFE API Server 地址
+addr = "http://bfe-api-server:8080"
+
+# 配置同步间隔（秒）
+interval = 10
+
+# 超时设置（秒）
+timeout = 5
+
+[local]
+# BFE 配置文件本地路径
+config_path = "/home/work/bfe/conf"
+
+# 是否启用本地备份
+enable_backup = true
+
+# 备份路径
+backup_path = "/home/work/conf-agent/backup"
+
+[log]
+# 日志级别: debug, info, warn, error
+level = "info"
+
+# 日志文件路径
+file = "/home/work/conf-agent/log/conf-agent.log"
+
+# 日志文件最大大小（MB）
+max_size = 100
+
+# 保留的旧日志文件数量
+max_backups = 3
+
+# 保留的最长天数
+max_age = 7
