@@ -156,6 +156,12 @@ OUTPUT_TYPE ?= docker
 BUILDER_NAME := bfe-builder
 NO_CACHE ?= false
 
+# make k8s-init-buildx: Initialize buildx builder for multi-platform builds
+k8s-init-buildx:
+	@docker buildx inspect $(BUILDER_NAME) >/dev/null 2>&1 || \
+		docker buildx create --name $(BUILDER_NAME) --driver docker-container --use
+	@docker buildx use $(BUILDER_NAME)
+
 # make k8s-base-debug: Build debug base image (with bash/vim)
 k8s-base-debug:
 	@echo "Building debug base image..."
@@ -218,6 +224,7 @@ k8s-image:
 	@echo "Building BFE application image..."
 	@NORM_CONF_VERSION=$$(echo "$(CONF_AGENT_VERSION)" | sed 's/^v*/v/'); \
 	NORM_BFE_VERSION=$$(echo "$(BFE_VERSION)" | sed 's/^v*/v/'); \
+	ARCH=$$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/'); \
 	BASE_TAG=$$(if [ "$(VARIANT)" = "prod" ]; then echo "$$NORM_CONF_VERSION"; else echo "$$NORM_CONF_VERSION-debug"; fi); \
 	IMAGE_TAG="$$NORM_BFE_VERSION"; \
 	echo "Using base image: $(BASE_IMAGE_NAME):$$BASE_TAG"; \
@@ -236,25 +243,72 @@ k8s-image:
 		docker build \
 			$$(if [ "$(NO_CACHE)" = "true" ]; then echo "--no-cache"; fi) \
 			--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$$BASE_TAG \
+			-t $(BFE_IMAGE_NAME):$$IMAGE_TAG-$$ARCH \
 			-t $(BFE_IMAGE_NAME):$$IMAGE_TAG \
 			-t $(BFE_IMAGE_NAME):latest \
 			-f $(DOCKER_DIR)/Dockerfile \
 			.; \
 	fi; \
-	echo "BFE application image built: $(BFE_IMAGE_NAME):$$IMAGE_TAG (also tagged as latest)"; \
+	echo "BFE application image built: $(BFE_IMAGE_NAME):$$IMAGE_TAG-$$ARCH (also tagged as $$IMAGE_TAG and latest)"; \
 	echo "Cleaning up dangling images..."; \
 	docker image prune -f
 
 # make k8s-all: Build base images and BFE application image
 k8s-all: k8s-base k8s-image
 
+# make k8s-push: Build and push multi-arch images to registry (REGISTRY is required)
+# Usage: make k8s-push REGISTRY=ghcr.io/your-org
+k8s-push: k8s-init-buildx
+	@if [ -z "$(REGISTRY)" ]; then \
+		echo "Error: REGISTRY is required"; \
+		echo "Usage: make k8s-push REGISTRY=ghcr.io/your-org"; \
+		exit 1; \
+	fi
+	@echo "Building and pushing multi-arch images to $(REGISTRY)..."
+	@NORM_CONF_VERSION=$$(echo "$(CONF_AGENT_VERSION)" | sed 's/^v*/v/'); \
+	NORM_BFE_VERSION=$$(echo "$(BFE_VERSION)" | sed 's/^v*/v/'); \
+	echo "Step 1/3: Building multi-arch base images..."; \
+	docker buildx build \
+		--platform $(PLATFORMS) \
+		--build-arg CONF_AGENT_VERSION=$(CONF_AGENT_VERSION) \
+		-t $(REGISTRY)/$(BASE_IMAGE_NAME):$$NORM_CONF_VERSION-debug \
+		-f $(DOCKER_DIR)/Dockerfile.base-debug \
+		--push \
+		.; \
+	docker buildx build \
+		--platform $(PLATFORMS) \
+		--build-arg CONF_AGENT_VERSION=$(CONF_AGENT_VERSION) \
+		-t $(REGISTRY)/$(BASE_IMAGE_NAME):$$NORM_CONF_VERSION \
+		-f $(DOCKER_DIR)/Dockerfile.base-prod \
+		--push \
+		.; \
+	echo "Step 2/3: Building multi-arch application image..."; \
+	BASE_TAG=$$(if [ "$(VARIANT)" = "prod" ]; then echo "$$NORM_CONF_VERSION"; else echo "$$NORM_CONF_VERSION-debug"; fi); \
+	docker buildx build \
+		--platform $(PLATFORMS) \
+		--build-arg BASE_IMAGE=$(REGISTRY)/$(BASE_IMAGE_NAME):$$BASE_TAG \
+		-t $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION \
+		-t $(REGISTRY)/$(BFE_IMAGE_NAME):latest \
+		-f $(DOCKER_DIR)/Dockerfile \
+		--push \
+		.; \
+	echo "Step 3/3: Verifying manifest..."; \
+	docker buildx imagetools inspect $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION; \
+	echo ""; \
+	echo "✅ Multi-arch images pushed successfully!"; \
+	echo "   Image: $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION"; \
+	echo "   Platforms: $(PLATFORMS)"; \
+	echo ""; \
+	echo "Pull on any platform:"; \
+	echo "   docker pull $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION"
+
 # make clean
 clean:
 	$(GOCLEAN)
-	rm -rf $(OUTDIR)
+	rm -rf $(OUTDIR)k8s-
 	rm -rf $(WORKROOT)/bfe
 	rm -rf $(GOPATH)/pkg/linux_amd64
 
 # avoid filename conflict and speed up build 
 .PHONY: all prepare compile test package clean build \
-        k8s-base-debug k8s-base-prod k8s-base k8s-image k8s-all
+        k8s-base-debug k8s-base-prod k8s-base k8s-image k8s-all k8s-push init-buildx

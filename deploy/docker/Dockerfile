@@ -33,4 +33,4 @@ WORKDIR /home/work
 # The script will:
 # 1. Start conf-agent in background (working directory: /home/work/conf-agent/)
 # 2. Start bfe in foreground (working directory: /home/work/bfe/bin/)
-CMD ["/home/work/entrypoint.sh"]
+ENTRYPOINT ["/home/work/entrypoint.sh"]

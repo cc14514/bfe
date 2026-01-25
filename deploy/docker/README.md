@@ -22,14 +22,15 @@ make k8s-image        # 构建应用镜像
 ```bash
 docker images | grep bfe
 # 输出示例：
-# bfe          1.8.0         ...   45MB
+# bfe          v1.8.0        ...   45MB
+# bfe          latest        ...   45MB
 # bfe-base     v0.0.2        ...   10MB
 ```
 
 ### 本地测试
 
 ```bash
-docker run --rm -p 8080:8080 -p 8421:8421 bfe:1.8.0
+docker run --rm -p 8080:8080 -p 8421:8421 bfe:v1.8.0
 
 # 另开终端验证
 curl http://localhost:8421/monitor
@@ -49,7 +50,8 @@ curl http://localhost:8421/monitor
 ### 应用镜像（bfe）
 
 基于基础镜像，添加 BFE 二进制和配置文件：
-- 镜像标签：`bfe:1.8.0`（从 VERSION 文件读取）
+- 镜像标签：`bfe:v1.8.0`、`bfe:latest`
+- 版本号：从 VERSION 文件读取后统一添加 `v` 前缀
 - 大小：~45MB（生产版基础）/ ~70MB（调试版基础）
 
 ## 构建参数
@@ -62,6 +64,8 @@ curl http://localhost:8421/monitor
 | `CONF_AGENT_VERSION` | 从文件读取 | conf-agent 版本（`deploy/docker/CONF_AGENT_VERSION`） |
 | `PLATFORMS` | 当前架构 | 目标平台，如 `linux/amd64,linux/arm64` |
 | `OUTPUT_TYPE` | `docker` | 输出类型：`docker` 或 `oci` |
+| `NO_CACHE` | `false` | 是否禁用构建缓存 |
+| `REGISTRY` | 无默认值 | 推送的镜像仓库地址（`k8s-push` 必需） |
 
 ### 使用示例
 
@@ -72,9 +76,65 @@ VARIANT=prod make k8s-all
 # 多架构构建并导出
 OUTPUT_TYPE=oci PLATFORMS=linux/amd64,linux/arm64 make k8s-all
 
+
+# 禁用缓存强制重新构建
+NO_CACHE=true make k8s-image
+```
+
+## 多架构镜像
+
+### 构建与推送
+
+构建 amd64 + arm64 双架构镜像并推送到远程仓库：
+
+```bash
+# 1. 初始化多架构构建器（仅需执行一次）
+make k8s-init-buildx
+
+# 2. 登录镜像仓库
+echo $GITHUB_TOKEN | docker login ghcr.io -u your-username --password-stdin
+
+# 3. 构建并推送多架构镜像
+make k8s-push REGISTRY=ghcr.io/bfenetworks
+
+# 4. 验证多架构支持
+docker buildx imagetools inspect ghcr.io/bfenetworks/bfe:v1.8.0
+```
+
+**输出示例**：
+```
+Manifests:
+  Platform:  linux/amd64  ← x86 架构
+  Platform:  linux/arm64  ← ARM 架构
+```
+
+**使用多架构镜像**：
+```bash
+# 在 x86 机器上自动拉取 amd64
+docker pull ghcr.io/bfenetworks/bfe:v1.8.0
+
+# 在 版本号统一**：构建时自动添加 `v` 前缀（`1.8.0` → `v1.8.0`）
+- **基础镜像标签**：使用 conf-agent 版本号（如 `bfe-base:v0.0.2`）
+- **应用镜像标签**：每次构建同时打三个标签
+  - `bfe:v1.8.0`（主标签，推荐使用）
+  - `bfe:v1.8.0-arm64`（带架构后缀，用于明确区分）
+  - `bfe:latest`（最新版本）
+- **自动清理**：构建后自动删除 dangling 镜像e:v1.8.0
 # 自定义版本
 CONF_AGENT_VERSION=v0.0.3 make k8s-base-prod
 ```
+
+## Makefile 目标说明
+
+| 目标 | 说明 |
+|------|------|
+| `k8s-base-prod` | 构建生产版基础镜像 |
+| `k8s-base-debug` | 构建调试版基础镜像 |
+| `k8s-base` | 构建两个基础镜像 |
+| `k8s-image` | 构建 BFE 应用镜像 |
+| `k8s-all` | 构建所有镜像（推荐） |
+| `k8s-init-buildx` | 初始化多架构构建器 |
+| `k8s-push` | 构建并推送多架构镜像到仓库 |
 
 ## 文件说明
 
@@ -94,8 +154,8 @@ CONF_AGENT_VERSION=v0.0.3 make k8s-base-prod
 
 ```bash
 # 推送到镜像仓库
-docker tag bfe:1.8.0 ghcr.io/your-org/bfe:1.8.0
-docker push ghcr.io/your-org/bfe:1.8.0
+docker tag bfe:v1.8.0 ghcr.io/your-org/bfe:v1.8.0
+docker push ghcr.io/your-org/bfe:v1.8.0
 ```
 
 ### 配置挂载
@@ -119,11 +179,12 @@ volumeMounts:
 
 ## 版本管理
 
-- **BFE 版本**：从 [../../VERSION](../../VERSION) 文件读取
-- **conf-agent 版本**：从 [CONF_AGENT_VERSION](CONF_AGENT_VERSION) 文件读取
+- **BFE 版本**：从 [../../VERSION](../../VERSION) 文件读取（如 `1.8.0`）
+- **conf-agent 版本**：从 [CONF_AGENT_VERSION](CONF_AGENT_VERSION) 文件读取（如 `v0.0.2`）
   - 版本号必须来自 [conf-agent 官方 releases](https://github.com/bfenetworks/conf-agent/releases/)
-  - 只能使用已发布的版本号（如 `v0.0.2`、`v0.0.3`）
-- **基础镜像标签**：使用 conf-agent 版本号（如 `v0.0.2`）
-- **应用镜像标签**：使用 BFE 版本号（如 `1.8.0`）
+  - 只能使用已发布的版本号
+- **版本号统一**：构建时自动添加 `v` 前缀（`1.8.0` → `v1.8.0`）
+- **基础镜像标签**：`bfe-base:v0.0.2`（生产版）、`bfe-base:v0.0.2-debug`（调试版）
+- **应用镜像标签**：`bfe:v1.8.0`、`bfe:latest`
 
 升级 conf-agent 只需修改 `CONF_AGENT_VERSION` 文件为官方 release 版本号，然后重新构建基础镜像。
