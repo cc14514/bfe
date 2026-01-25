@@ -95,10 +95,10 @@ make k8s-init-buildx
 echo $GITHUB_TOKEN | docker login ghcr.io -u your-username --password-stdin
 
 # 3. 构建并推送多架构镜像
-make k8s-push REGISTRY=ghcr.io/bfenetworks
+make k8s-push REGISTRY=ghcr.io/your-username
 
 # 4. 验证多架构支持
-docker buildx imagetools inspect ghcr.io/bfenetworks/bfe:v1.8.0
+docker buildx imagetools inspect ghcr.io/your-username/bfe:v1.8.0
 ```
 
 **输出示例**：
@@ -106,22 +106,6 @@ docker buildx imagetools inspect ghcr.io/bfenetworks/bfe:v1.8.0
 Manifests:
   Platform:  linux/amd64  ← x86 架构
   Platform:  linux/arm64  ← ARM 架构
-```
-
-**使用多架构镜像**：
-```bash
-# 在 x86 机器上自动拉取 amd64
-docker pull ghcr.io/bfenetworks/bfe:v1.8.0
-
-# 在 版本号统一**：构建时自动添加 `v` 前缀（`1.8.0` → `v1.8.0`）
-- **基础镜像标签**：使用 conf-agent 版本号（如 `bfe-base:v0.0.2`）
-- **应用镜像标签**：每次构建同时打三个标签
-  - `bfe:v1.8.0`（主标签，推荐使用）
-  - `bfe:v1.8.0-arm64`（带架构后缀，用于明确区分）
-  - `bfe:latest`（最新版本）
-- **自动清理**：构建后自动删除 dangling 镜像e:v1.8.0
-# 自定义版本
-CONF_AGENT_VERSION=v0.0.3 make k8s-base-prod
 ```
 
 ## Makefile 目标说明
@@ -150,32 +134,6 @@ CONF_AGENT_VERSION=v0.0.3 make k8s-base-prod
 
 构建完成后，参考 [../kubernetes/README.md](../kubernetes/README.md) 进行部署。
 
-### 推送镜像
-
-```bash
-# 推送到镜像仓库
-docker tag bfe:v1.8.0 ghcr.io/your-org/bfe:v1.8.0
-docker push ghcr.io/your-org/bfe:v1.8.0
-```
-
-### 配置挂载
-
-生产环境需要挂载配置文件：
-
-```yaml
-# BFE 配置
-volumeMounts:
-- name: bfe-config
-  mountPath: /home/work/bfe/conf
-  readOnly: true
-
-# conf-agent 配置
-- name: conf-agent-config
-  mountPath: /home/work/conf-agent/conf
-  readOnly: true
-```
-
-详细部署说明见 [../kubernetes/README.md](../kubernetes/README.md)。
 
 ## 版本管理
 
