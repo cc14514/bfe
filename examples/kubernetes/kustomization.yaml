@@ -5,5 +5,7 @@ namespace: bfe-system
 
 resources:
   - namespace.yaml
+  - configmap-bfe.yaml
+  - configmap-conf-agent.yaml
   - deployment.yaml
   - service.yaml
