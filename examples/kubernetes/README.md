@@ -1,6 +1,6 @@
 # BFE Kubernetes 部署
 
-快速部署 BFE 到 Kubernetes 集群。镜像构建参考 [../docker/README.md](../docker/README.md)。
+快速部署 BFE 到 Kubernetes 集群。
 
 ## 快速开始
 
@@ -14,17 +14,12 @@ image: ghcr.io/your-org/bfe:v1.8.0  # 替换为实际镜像地址
 
 ### 2. 创建 ConfigMap
 
-```bash
-cd deploy/kubernetes
-
-kubectl create namespace bfe-system
-kubectl create configmap bfe-config --from-file=conf-example/bfe.conf -n bfe-system
-kubectl create configmap conf-agent-config --from-file=conf-example/conf-agent.toml -n bfe-system
-```
+ConfigMap 已直接提供为 YAML（见 `configmap-bfe.yaml` / `configmap-conf-agent.yaml`），因此不再需要手动 `kubectl create configmap ...`。
 
 ### 3. 部署
 
 ```bash
+cd examples/kubernetes
 kubectl apply -k .
 ```
 
@@ -41,10 +36,11 @@ curl http://localhost:8421/monitor
 
 ## 配置说明
 
-ConfigMap 配置文件位于 [conf-example/](conf-example/) 目录：
+ConfigMap YAML：
+- [configmap-bfe.yaml](configmap-bfe.yaml)
+- [configmap-conf-agent.yaml](configmap-conf-agent.yaml)
 
-- **bfe.conf** - BFE 主配置文件
-- **conf-agent.toml** - conf-agent 配置文件
+生产环境使用前请根据实际需求修改 ConfigMap 内容。
 
 生产环境使用前请根据实际需求修改配置。
 

@@ -138,177 +138,93 @@ license-check:
 license-fix:
 	$(LICENSEEYE) header fix
 
-# make docker
+
+# Docker image build targets
+BFE_IMAGE_NAME ?= bfe
+# conf-agent version used in Docker image build.
+# Default: 0.0.2
+# Override example: make docker CONF_AGENT_VERSION=0.0.3
+CONF_AGENT_VERSION ?= 0.0.2
+NO_CACHE ?= false
+
+# Optional buildx (multi-arch) settings
+PLATFORMS ?= linux/amd64,linux/arm64
+BUILDER_NAME ?= bfe-builder
+
+# make docker: Build BFE docker images (prod + debug)
 docker:
+	@echo "Building BFE docker images (prod + debug)..."
+	@NORM_BFE_VERSION=$$(echo "$(BFE_VERSION)" | sed 's/^v*/v/'); \
+	NORM_CONF_VERSION=$$(echo "$(CONF_AGENT_VERSION)" | sed 's/^v*/v/'); \
+	echo "BFE version: $$NORM_BFE_VERSION"; \
+	echo "conf-agent version: $$NORM_CONF_VERSION"; \
+	echo "Step 1/2: build prod image"; \
 	docker build \
-		-t bfe:$(BFE_VERSION) \
+		$$(if [ "$(NO_CACHE)" = "true" ]; then echo "--no-cache"; fi) \
+		--build-arg VARIANT=prod \
+		--build-arg CONF_AGENT_VERSION=$$NORM_CONF_VERSION \
+		-t $(BFE_IMAGE_NAME):$$NORM_BFE_VERSION \
+		-t $(BFE_IMAGE_NAME):latest \
+		-f Dockerfile \
+		.; \
+	echo "Step 2/2: build debug image"; \
+	docker build \
+		$$(if [ "$(NO_CACHE)" = "true" ]; then echo "--no-cache"; fi) \
+		--build-arg VARIANT=debug \
+		--build-arg CONF_AGENT_VERSION=$$NORM_CONF_VERSION \
+		-t $(BFE_IMAGE_NAME):$$NORM_BFE_VERSION-debug \
 		-f Dockerfile \
 		.
 
-# Kubernetes image build targets
-DOCKER_DIR := deploy/docker
-BASE_IMAGE_NAME ?= bfe-base
-BFE_IMAGE_NAME ?= bfe
-CONF_AGENT_VERSION ?= $(shell cat $(DOCKER_DIR)/CONF_AGENT_VERSION)
-VARIANT ?= debug
-PLATFORMS ?= linux/amd64,linux/arm64
-OUTPUT_TYPE ?= docker
-BUILDER_NAME := bfe-builder
-NO_CACHE ?= false
-
-# make k8s-init-buildx: Initialize buildx builder for multi-platform builds
-k8s-init-buildx:
-	@docker buildx inspect $(BUILDER_NAME) >/dev/null 2>&1 || \
-		docker buildx create --name $(BUILDER_NAME) --driver docker-container --use
-	@docker buildx use $(BUILDER_NAME)
-
-# make k8s-base-debug: Build debug base image (with bash/vim)
-k8s-base-debug:
-	@echo "Building debug base image..."
-	@NORM_VERSION=$$(echo "$(CONF_AGENT_VERSION)" | sed 's/^v*/v/'); \
-	docker buildx inspect $(BUILDER_NAME) >/dev/null 2>&1 || docker buildx create --name $(BUILDER_NAME) --use; \
-	if [ "$(OUTPUT_TYPE)" = "oci" ]; then \
-		mkdir -p output; \
-		docker buildx build \
-			--platform $(PLATFORMS) \
-			--build-arg CONF_AGENT_VERSION=$(CONF_AGENT_VERSION) \
-			-t $(BASE_IMAGE_NAME):$$NORM_VERSION-debug \
-			-f $(DOCKER_DIR)/Dockerfile.base-debug \
-			--output type=oci,dest=output/$(BASE_IMAGE_NAME)-$$NORM_VERSION-debug.tar \
-			.; \
-	else \
-		docker buildx build \
-			--platform $(shell uname -m | sed 's/x86_64/linux\/amd64/;s/aarch64/linux\/arm64/;s/arm64/linux\/arm64/') \
-			--build-arg CONF_AGENT_VERSION=$(CONF_AGENT_VERSION) \
-			-t $(BASE_IMAGE_NAME):$$NORM_VERSION-debug \
-			-f $(DOCKER_DIR)/Dockerfile.base-debug \
-			--load \
-			.; \
-	fi; \
-	echo "Debug base image built: $(BASE_IMAGE_NAME):$$NORM_VERSION-debug"; \
-	echo "Cleaning up dangling images..."; \
-	docker image prune -f
-
-# make k8s-base-prod: Build production base image (minimal)
-k8s-base-prod:
-	@echo "Building production base image..."
-	@NORM_VERSION=$$(echo "$(CONF_AGENT_VERSION)" | sed 's/^v*/v/'); \
-	docker buildx inspect $(BUILDER_NAME) >/dev/null 2>&1 || docker buildx create --name $(BUILDER_NAME) --use; \
-	if [ "$(OUTPUT_TYPE)" = "oci" ]; then \
-		mkdir -p output; \
-		docker buildx build \
-			--platform $(PLATFORMS) \
-			--build-arg CONF_AGENT_VERSION=$(CONF_AGENT_VERSION) \
-			-t $(BASE_IMAGE_NAME):$$NORM_VERSION \
-			-f $(DOCKER_DIR)/Dockerfile.base-prod \
-			--output type=oci,dest=output/$(BASE_IMAGE_NAME)-$$NORM_VERSION.tar \
-			.; \
-	else \
-		docker buildx build \
-			--platform $(shell uname -m | sed 's/x86_64/linux\/amd64/;s/aarch64/linux\/arm64/;s/arm64/linux\/arm64/') \
-			--build-arg CONF_AGENT_VERSION=$(CONF_AGENT_VERSION) \
-			-t $(BASE_IMAGE_NAME):$$NORM_VERSION \
-			-f $(DOCKER_DIR)/Dockerfile.base-prod \
-			--load \
-			.; \
-	fi; \
-	echo "Production base image built: $(BASE_IMAGE_NAME):$$NORM_VERSION"; \
-	echo "Cleaning up dangling images..."; \
-	docker image prune -f
-
-# make k8s-base: Build both debug and production base images
-k8s-base: k8s-base-debug k8s-base-prod
-
-# make k8s-image: Build BFE application image for Kubernetes
-k8s-image:
-	@echo "Building BFE application image..."
-	@NORM_CONF_VERSION=$$(echo "$(CONF_AGENT_VERSION)" | sed 's/^v*/v/'); \
-	NORM_BFE_VERSION=$$(echo "$(BFE_VERSION)" | sed 's/^v*/v/'); \
-	ARCH=$$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/'); \
-	BASE_TAG=$$(if [ "$(VARIANT)" = "prod" ]; then echo "$$NORM_CONF_VERSION"; else echo "$$NORM_CONF_VERSION-debug"; fi); \
-	IMAGE_TAG="$$NORM_BFE_VERSION"; \
-	echo "Using base image: $(BASE_IMAGE_NAME):$$BASE_TAG"; \
-	echo "Building application image: $(BFE_IMAGE_NAME):$$IMAGE_TAG"; \
-	if [ "$(OUTPUT_TYPE)" = "oci" ]; then \
-		mkdir -p output; \
-		docker buildx create --name $(BUILDER_NAME) --use >/dev/null 2>&1 || docker buildx use $(BUILDER_NAME); \
-		docker buildx build \
-			--platform $(PLATFORMS) \
-			--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$$BASE_TAG \
-			-t $(BFE_IMAGE_NAME):$$IMAGE_TAG \
-			-f $(DOCKER_DIR)/Dockerfile \
-			--output type=oci,dest=output/$(BFE_IMAGE_NAME)-$$IMAGE_TAG.tar \
-			.; \
-	else \
-		docker build \
-			$$(if [ "$(NO_CACHE)" = "true" ]; then echo "--no-cache"; fi) \
-			--build-arg BASE_IMAGE=$(BASE_IMAGE_NAME):$$BASE_TAG \
-			-t $(BFE_IMAGE_NAME):$$IMAGE_TAG-$$ARCH \
-			-t $(BFE_IMAGE_NAME):$$IMAGE_TAG \
-			-t $(BFE_IMAGE_NAME):latest \
-			-f $(DOCKER_DIR)/Dockerfile \
-			.; \
-	fi; \
-	echo "BFE application image built: $(BFE_IMAGE_NAME):$$IMAGE_TAG-$$ARCH (also tagged as $$IMAGE_TAG and latest)"; \
-	echo "Cleaning up dangling images..."; \
-	docker image prune -f
-
-# make k8s-all: Build base images and BFE application image
-k8s-all: k8s-base k8s-image
-
-# make k8s-push: Build and push multi-arch images to registry (REGISTRY is required)
-# Usage: make k8s-push REGISTRY=ghcr.io/your-org
-k8s-push: k8s-init-buildx
+# make docker-push: Build & push multi-arch images using buildx (REGISTRY is required)
+# Usage: make docker-push REGISTRY=ghcr.io/your-org
+docker-push:
 	@if [ -z "$(REGISTRY)" ]; then \
 		echo "Error: REGISTRY is required"; \
-		echo "Usage: make k8s-push REGISTRY=ghcr.io/your-org"; \
+		echo "Usage: make docker-push REGISTRY=ghcr.io/your-org"; \
 		exit 1; \
 	fi
-	@echo "Building and pushing multi-arch images to $(REGISTRY)..."
-	@NORM_CONF_VERSION=$$(echo "$(CONF_AGENT_VERSION)" | sed 's/^v*/v/'); \
-	NORM_BFE_VERSION=$$(echo "$(BFE_VERSION)" | sed 's/^v*/v/'); \
-	echo "Step 1/3: Building multi-arch base images..."; \
+	@echo "Building and pushing multi-arch images via buildx..."
+	@echo "Platforms: $(PLATFORMS)"
+	@docker buildx inspect $(BUILDER_NAME) >/dev/null 2>&1 || docker buildx create --name $(BUILDER_NAME) --driver docker-container --use
+	@docker buildx use $(BUILDER_NAME)
+	@NORM_BFE_VERSION=$$(echo "$(BFE_VERSION)" | sed 's/^v*/v/'); \
+	NORM_CONF_VERSION=$$(echo "$(CONF_AGENT_VERSION)" | sed 's/^v*/v/'); \
+	NO_CACHE_OPT=$$(if [ "$(NO_CACHE)" = "true" ]; then echo "--no-cache"; fi); \
+	echo "BFE version: $$NORM_BFE_VERSION"; \
+	echo "conf-agent version: $$NORM_CONF_VERSION"; \
+	echo "Step 1/2: build+push prod (multi-arch)"; \
 	docker buildx build \
 		--platform $(PLATFORMS) \
-		--build-arg CONF_AGENT_VERSION=$(CONF_AGENT_VERSION) \
-		-t $(REGISTRY)/$(BASE_IMAGE_NAME):$$NORM_CONF_VERSION-debug \
-		-f $(DOCKER_DIR)/Dockerfile.base-debug \
-		--push \
-		.; \
-	docker buildx build \
-		--platform $(PLATFORMS) \
-		--build-arg CONF_AGENT_VERSION=$(CONF_AGENT_VERSION) \
-		-t $(REGISTRY)/$(BASE_IMAGE_NAME):$$NORM_CONF_VERSION \
-		-f $(DOCKER_DIR)/Dockerfile.base-prod \
-		--push \
-		.; \
-	echo "Step 2/3: Building multi-arch application image..."; \
-	BASE_TAG=$$(if [ "$(VARIANT)" = "prod" ]; then echo "$$NORM_CONF_VERSION"; else echo "$$NORM_CONF_VERSION-debug"; fi); \
-	docker buildx build \
-		--platform $(PLATFORMS) \
-		--build-arg BASE_IMAGE=$(REGISTRY)/$(BASE_IMAGE_NAME):$$BASE_TAG \
+		$$NO_CACHE_OPT \
+		--build-arg VARIANT=prod \
+		--build-arg CONF_AGENT_VERSION=$$NORM_CONF_VERSION \
 		-t $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION \
 		-t $(REGISTRY)/$(BFE_IMAGE_NAME):latest \
-		-f $(DOCKER_DIR)/Dockerfile \
+		-f Dockerfile \
 		--push \
 		.; \
-	echo "Step 3/3: Verifying manifest..."; \
-	docker buildx imagetools inspect $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION; \
-	echo ""; \
-	echo "✅ Multi-arch images pushed successfully!"; \
-	echo "   Image: $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION"; \
-	echo "   Platforms: $(PLATFORMS)"; \
-	echo ""; \
-	echo "Pull on any platform:"; \
-	echo "   docker pull $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION"
+	echo "Step 2/2: build+push debug (multi-arch)"; \
+	docker buildx build \
+		--platform $(PLATFORMS) \
+		$$NO_CACHE_OPT \
+		--build-arg VARIANT=debug \
+		--build-arg CONF_AGENT_VERSION=$$NORM_CONF_VERSION \
+		-t $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION-debug \
+		-f Dockerfile \
+		--push \
+		.; \
+	echo "Pushed multi-arch:"; \
+	echo "  - $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION"; \
+	echo "  - $(REGISTRY)/$(BFE_IMAGE_NAME):$$NORM_BFE_VERSION-debug"; \
+	echo "  - $(REGISTRY)/$(BFE_IMAGE_NAME):latest (prod)"
 
 # make clean
 clean:
 	$(GOCLEAN)
-	rm -rf $(OUTDIR)k8s-
+	rm -rf $(OUTDIR)
 	rm -rf $(WORKROOT)/bfe
 	rm -rf $(GOPATH)/pkg/linux_amd64
 
 # avoid filename conflict and speed up build 
-.PHONY: all prepare compile test package clean build \
-        k8s-base-debug k8s-base-prod k8s-base k8s-image k8s-all k8s-push init-buildx
+.PHONY: all prepare compile test package clean build docker docker-push
